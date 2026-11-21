@@ -25,6 +25,7 @@ jobs:
           set -euo pipefail
           git config user.name "OpenLink bootstrap"
           git config user.email "hello@openlink.local"
+          git checkout -B main
           git add -A
-          git commit -m "Import OpenLink 1.0.0 source" || echo "nothing to commit"
-          git push
+          git commit -m "Import OpenLink 1.0.0 source"
+          git push origin HEAD:main
