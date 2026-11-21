@@ -1,0 +1,85 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'desktop/**'
+      - 'shared/**'
+      - 'scripts/**'
+      - '.github/workflows/build-windows.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'shared/**'
+      - '.github/workflows/build-windows.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: OpenLink-Windows.exe
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Generate icons
+        working-directory: .
+        run: node scripts/make-icons.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (main + renderer)
+        run: npm run build
+
+      - name: Package installer
+        run: npx electron-builder --win --publish never --config electron-builder.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify artifact
+        run: |
+          set -euo pipefail
+          ls -la release
+          test -f release/OpenLink-Windows.exe
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenLink-Windows
+          path: desktop/release/OpenLink-Windows.exe
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/release/OpenLink-Windows.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
