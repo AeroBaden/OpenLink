@@ -7,7 +7,7 @@ export const PROTOCOL_VERSION = 1;
 export const DEFAULT_PORT = 8765;
 /** USB-C ADB boost: `adb reverse tcp:8765 tcp:8765` maps the phone's localhost to the PC server. */
 export const USB_PORT = 8765;
-export const PAIR_CODE_TTL_MS = 120_000;
+export const PAIR_CODE_TTL_MS = 300_000;
 export const PAIR_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const CLIPBOARD_HISTORY_LIMIT = 20;
 export const TELEMETRY_INTERVAL_MS = 1_000;

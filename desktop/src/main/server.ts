@@ -419,9 +419,9 @@ export class LinkServer {
       frame.idPubKey.length > 40 &&
       Boolean(device?.id) &&
       Boolean(device?.name);
-    if (!valid || !this.deps.pairing.consume(frame.code)) {
+    if (!valid || !this.deps.pairing.matches(frame.code)) {
       this.raw(conn.ws, { t: 'pair.reject', reason: 'code' });
-      this.deps.log('pairing rejected: bad or expired code');
+      this.deps.log(`pairing rejected from ${conn.transport}: bad or expired code`);
       return;
     }
     try {
@@ -435,6 +435,10 @@ export class LinkServer {
       conn.device = record;
       conn.sealer = new Sealer(deriveSessionKey(conn.serverKey, frame.pubKey, record.pairSecret));
       conn.sealed = true;
+      // Only a completed pairing burns the code: a dropped connection right
+      // after the scan should not invalidate the QR the user is looking at.
+      this.deps.pairing.consume(frame.code);
+      this.authFailures = 0;
       this.raw(conn.ws, {
         t: 'pair.accept',
         serverName: this.deps.store.settings.serverName,

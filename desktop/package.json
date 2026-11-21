@@ -1,7 +1,7 @@
 {
   "name": "openlink-desktop",
   "productName": "OpenLink",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenLink for Windows — local Wi-Fi / USB-C continuity host for Android. No cloud, no account.",
   "main": "dist/main/index.js",
   "author": {

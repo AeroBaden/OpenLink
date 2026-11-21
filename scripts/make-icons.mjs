@@ -206,68 +206,107 @@ const MINT = [124, 242, 200];
  * ice→mint gradient plus two halo passes for the neon bloom.
  */
 /**
- * The OpenLink mark: two rings that overlap slightly at the centre, so the
- * strands cross in a clean X and the holes stay circular. Lit ice → mint.
+ * The OpenLink mark: one continuous neon ribbon — a Bernoulli lemniscate with
+ * round lobes, a clean crossing in the middle and no visible ends. Lit from
+ * ice-blue through cyan to mint. The bloom is a blurred copy of the stroke
+ * coverage, which keeps the 1024 px master cheap to rasterise.
  */
-function drawLoop(cv, { span = 0.68, thickness = 0.05, glow = 1, offsetY = 0, tone = 'dark' }) {
-  const { size } = cv;
+function lemniscatePoints(size, span, offsetY) {
+  const a = (size * span) / 2;
   const cx = size / 2;
   const cy = size / 2 + offsetY;
-  const ring = (size * span) / 4; // lobe radius
-  const offset = ring * 0.9; // <1 ring radius: the strands overlap in the middle
-  const stroke = Math.max(1.4, size * thickness);
-  const half = stroke / 2;
-  const centers = [
-    [cx - offset, cy],
-    [cx + offset, cy],
-  ];
+  const stretch = 1.45;
+  const total = Math.max(900, Math.round(size * 3.2));
+  const points = [];
+  for (let i = 0; i <= total; i++) {
+    const t = (i / total) * Math.PI * 2;
+    const s = Math.sin(t);
+    const c = Math.cos(t);
+    const denom = 1 + s * s;
+    points.push({ x: cx + (a * c) / denom, y: cy + (stretch * a * s * c) / denom });
+  }
+  return points;
+}
 
-  const start = tone === 'dark' ? BLUE : [22, 114, 208];
-  const middle = tone === 'dark' ? CYAN : [30, 156, 194];
-  const end = tone === 'dark' ? MINT : [14, 152, 116];
+/** Separable box blur over a coverage field — the cheap half of the neon glow. */
+function blurCoverage(src, size, radius) {
+  const r = Math.max(1, Math.round(radius));
+  const norm = 1 / (r * 2 + 1);
+  const clamp = (i) => (i < 0 ? 0 : i >= size ? size - 1 : i);
+  const tmp = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const row = y * size;
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += src[row + clamp(x)];
+    for (let x = 0; x < size; x++) {
+      tmp[row + x] = sum * norm;
+      sum += src[row + clamp(x + r + 1)] - src[row + clamp(x - r)];
+    }
+  }
+  const out = new Float32Array(size * size);
+  for (let x = 0; x < size; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[clamp(y) * size + x];
+    for (let y = 0; y < size; y++) {
+      out[y * size + x] = sum * norm;
+      sum += tmp[clamp(y + r + 1) * size + x] - tmp[clamp(y - r) * size + x];
+    }
+  }
+  return out;
+}
+
+function drawLoop(cv, { span = 0.68, thickness = 0.05, glow = 1, offsetY = 0, tone = 'dark' }) {
+  const { size } = cv;
+  const points = lemniscatePoints(size, span, offsetY);
+  const stroke = Math.max(1.8, size * thickness);
+  const half = stroke / 2;
+
+  const start = tone === 'dark' ? BLUE : [20, 108, 200];
+  const middle = tone === 'dark' ? CYAN : [26, 150, 190];
+  const end = tone === 'dark' ? MINT : [12, 146, 112];
+  const left = size / 2 - (size * span) / 2;
   const colorAt = (x) => {
-    const t = clamp01((x - (cx - offset - ring)) / (2 * (offset + ring)));
+    const t = clamp01((x - (left - stroke)) / (size * span + stroke * 2));
     return t < 0.5 ? mix(start, middle, t * 2) : mix(middle, end, (t - 0.5) * 2);
   };
 
-  const bounds = (reach) => ({
-    minX: Math.max(0, Math.floor(cx - offset - ring - reach - 2)),
-    maxX: Math.min(size - 1, Math.ceil(cx + offset + ring + reach + 2)),
-    minY: Math.max(0, Math.floor(cy - ring - reach - 2)),
-    maxY: Math.min(size - 1, Math.ceil(cy + ring + reach + 2)),
-  });
-
-  const ringDistance = (x, y) => {
-    let best = Infinity;
-    for (const [rx, ry] of centers) best = Math.min(best, Math.abs(Math.hypot(x - rx, y - ry) - ring));
-    return best;
-  };
-
-  // Neon bloom: two soft annuli before the core stroke.
-  if (glow > 0) {
-    const halos = [
-      { reach: half + size * 0.075, alpha: 0.11 * glow },
-      { reach: half + size * 0.028, alpha: 0.2 * glow },
-    ];
-    for (const halo of halos) {
-      const box = bounds(halo.reach);
-      for (let y = box.minY; y <= box.maxY; y++) {
-        for (let x = box.minX; x <= box.maxX; x++) {
-          const dist = ringDistance(x + 0.5, y + 0.5);
-          // soft falloff so the bloom fades out instead of ending on a hard edge
-          const cover = smooth(halo.reach, halo.reach * 0.35, dist) * halo.alpha;
-          if (cover > 0) over(cv, (y * size + x) * 4, colorAt(x), cover);
-        }
+  // Stroke coverage, max-composited so the strand crossing itself stays even.
+  const core = new Float32Array(size * size);
+  const reach = Math.ceil(half + 1.5);
+  for (const p of points) {
+    const x0 = Math.max(0, Math.floor(p.x - reach));
+    const x1 = Math.min(size - 1, Math.ceil(p.x + reach));
+    const y0 = Math.max(0, Math.floor(p.y - reach));
+    const y1 = Math.min(size - 1, Math.ceil(p.y + reach));
+    for (let y = y0; y <= y1; y++) {
+      const dy = y + 0.5 - p.y;
+      for (let x = x0; x <= x1; x++) {
+        const dx = x + 0.5 - p.x;
+        const cover = clamp01(half + 0.75 - Math.hypot(dx, dy));
+        const idx = y * size + x;
+        if (cover > core[idx]) core[idx] = cover;
       }
     }
   }
 
-  const core = bounds(half + 2);
-  for (let y = core.minY; y <= core.maxY; y++) {
-    for (let x = core.minX; x <= core.maxX; x++) {
-      const cover = clamp01(half - ringDistance(x + 0.5, y + 0.5) + 0.5);
-      if (cover <= 0) continue;
-      over(cv, (y * size + x) * 4, colorAt(x), cover);
+  // Neon bloom: two blurred copies of the stroke, composited behind it.
+  if (glow > 0) {
+    const tight = blurCoverage(core, size, size * 0.018);
+    const wide = blurCoverage(core, size, size * 0.055);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = y * size + x;
+        const halo = Math.min(1, (tight[i] * 1.4 + wide[i] * 1.6) * glow);
+        if (halo > 0.002) over(cv, i * 4, colorAt(x), halo * 0.62);
+      }
+    }
+  }
+
+  // The ribbon itself.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const cover = core[y * size + x];
+      if (cover > 0) over(cv, (y * size + x) * 4, colorAt(x), cover);
     }
   }
 }

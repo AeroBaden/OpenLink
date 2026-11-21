@@ -40,7 +40,7 @@ const en: Dict = {
   'common.today': 'Today',
 
   'pair.title': 'Pair a phone',
-  'pair.hint': 'Scan this code with OpenLink on Android. It expires in two minutes and never leaves your network.',
+  'pair.hint': 'Scan this code with OpenLink on Android. It expires after a few minutes and never leaves your network.',
   'pair.code': 'Pairing code',
   'pair.scan': 'Scan QR code',
   'pair.connecting': 'Connecting…',
@@ -61,6 +61,9 @@ const en: Dict = {
   'pair.wrongCode': 'Wrong or expired code',
   'pair.cameraDenied': 'Camera permission is required to scan the code.',
   'pair.usbHint': 'Connect the USB-C cable for the wired boost.',
+  'pair.firewall':
+    'Phone and PC must be on the same Wi-Fi (guest networks block this). If the scan does not connect, allow OpenLink through Windows Firewall for private networks.',
+  'pair.expiredScan': 'That code expired. A fresh one is on screen — scan it again.',
 
   'status.connected': 'Connected',
   'status.disconnected': 'Disconnected',
@@ -282,7 +285,7 @@ const de: Dict = {
   'common.today': 'Heute',
 
   'pair.title': 'Handy koppeln',
-  'pair.hint': 'Scanne diesen Code mit OpenLink auf Android. Er läuft nach zwei Minuten ab und verlässt nie dein Netzwerk.',
+  'pair.hint': 'Scanne diesen Code mit OpenLink auf Android. Er läuft nach einigen Minuten ab und verlässt nie dein Netzwerk.',
   'pair.code': 'Kopplungscode',
   'pair.scan': 'QR-Code scannen',
   'pair.connecting': 'Verbinde…',
@@ -303,6 +306,9 @@ const de: Dict = {
   'pair.wrongCode': 'Code falsch oder abgelaufen',
   'pair.cameraDenied': 'Zum Scannen des Codes ist Kamerazugriff nötig.',
   'pair.usbHint': 'USB-C-Kabel anschließen für den kabelgebundenen Boost.',
+  'pair.firewall':
+    'Handy und PC müssen im selben WLAN sein (Gastnetze blockieren das). Wenn der Scan nicht verbindet: OpenLink in der Windows-Firewall für private Netzwerke erlauben.',
+  'pair.expiredScan': 'Der Code ist abgelaufen. Auf dem Bildschirm steht schon ein neuer — scanne den.',
 
   'status.connected': 'Verbunden',
   'status.disconnected': 'Getrennt',

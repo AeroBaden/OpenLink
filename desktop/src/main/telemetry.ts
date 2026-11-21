@@ -14,8 +14,17 @@ import type { GpuSample, Telemetry, ThermalSample } from '../../../shared/protoc
  * Nothing here throws: a missing sensor is reported as `null`, never faked.
  */
 
-const LHM_CACHE_MS = 2_500;
+const LHM_CACHE_MS = 5_000;
 const PS_TIMEOUT_MS = 6_000;
+/**
+ * Expensive sources (WMI, WMI-backed systeminformation calls, nvidia-smi and
+ * the audio agent) are cached: querying them every tick used to spawn several
+ * PowerShell processes per second, which made the whole machine stutter.
+ */
+const SLOW_REFRESH_MS = 5_000;
+const NVIDIA_REFRESH_MS = 3_000;
+const AUDIO_REFRESH_MS = 3_000;
+const NET_REFRESH_MS = 2_000;
 
 interface LhmReading {
   cpuTemp: number | null;
@@ -154,6 +163,12 @@ export interface TelemetrySourceHooks {
   agentScriptPath: () => string;
 }
 
+type GraphicsData = Awaited<ReturnType<typeof si.graphics>>;
+type BatteryData = Awaited<ReturnType<typeof si.battery>>;
+type WifiData = Awaited<ReturnType<typeof si.wifiConnections>>;
+type TempData = Awaited<ReturnType<typeof si.cpuTemperature>>;
+type NetData = Awaited<ReturnType<typeof si.networkStats>>;
+
 export class TelemetryEngine {
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
@@ -162,6 +177,21 @@ export class TelemetryEngine {
   private lastNet = { ts: 0, rx: 0, tx: 0 };
   private lastAudio: { volume: number | null; muted: boolean | null } = { volume: null, muted: null };
   private lastSample: Telemetry | null = null;
+  private slowAt = 0;
+  private slowBusy = false;
+  private slow: {
+    temps: TempData | null;
+    graphics: GraphicsData | null;
+    battery: BatteryData | null;
+    wifi: WifiData;
+    clockMhz: number | null;
+  } = { temps: null, graphics: null, battery: null, wifi: [], clockMhz: null };
+  private netAt = 0;
+  private netStats: NetData = [];
+  private audioAt = 0;
+  private nvidiaCache: NvidiaReading | null = null;
+  private nvidiaAt = 0;
+  private nvidiaBusy = false;
 
   constructor(private readonly hooks: TelemetrySourceHooks) {}
 
@@ -201,30 +231,91 @@ export class TelemetryEngine {
     }
     try {
       const stats = await si.networkStats(this.iface ?? undefined);
+      this.netStats = stats;
+      this.netAt = Date.now();
       if (stats[0]) this.lastNet = { ts: Date.now(), rx: stats[0].rx_bytes, tx: stats[0].tx_bytes };
     } catch {
       /* ignore */
     }
     try {
       this.lastAudio = await this.hooks.volume();
+      this.audioAt = Date.now();
     } catch {
       /* ignore */
     }
+    await Promise.all([this.refreshSlow(), this.refreshNvidia(), lhm.read()]);
+  }
+
+  /** WMI-heavy reads, refreshed on a background cadence instead of every tick. */
+  private async refreshSlow(): Promise<void> {
+    if (this.slowBusy) return;
+    this.slowBusy = true;
+    try {
+      const [temps, graphics, battery, wifi, speed] = await Promise.all([
+        si.cpuTemperature().catch(() => null),
+        si.graphics().catch(() => null),
+        si.battery().catch(() => null),
+        si.wifiConnections().catch(() => [] as WifiData),
+        si.cpuCurrentSpeed().catch(() => null),
+      ]);
+      this.slow = {
+        temps,
+        graphics,
+        battery,
+        wifi,
+        clockMhz: speed?.avg ? Math.round(speed.avg * 1000) : null,
+      };
+    } catch {
+      /* keep the previous reading */
+    } finally {
+      this.slowAt = Date.now();
+      this.slowBusy = false;
+    }
+  }
+
+  private async refreshNvidia(): Promise<NvidiaReading | null> {
+    if (this.nvidiaBusy) return this.nvidiaCache;
+    if (Date.now() - this.nvidiaAt < NVIDIA_REFRESH_MS) return this.nvidiaCache;
+    this.nvidiaBusy = true;
+    try {
+      this.nvidiaCache = await readNvidia();
+    } finally {
+      this.nvidiaAt = Date.now();
+      this.nvidiaBusy = false;
+    }
+    return this.nvidiaCache;
   }
 
   async sample(): Promise<Telemetry> {
-    const [load, temps, mem, graphics, battery, netStats, wifi, nvidia, lhmRead, audio] = await Promise.all([
+    // Refresh the expensive readings off the hot path; the tick itself only
+    // reads cheap counters plus whatever the caches hold.
+    if (Date.now() - this.slowAt > SLOW_REFRESH_MS) void this.refreshSlow();
+    if (Date.now() - this.netAt > NET_REFRESH_MS) {
+      this.netAt = Date.now();
+      void si
+        .networkStats(this.iface ?? undefined)
+        .then((stats) => (this.netStats = stats))
+        .catch(() => undefined);
+    }
+
+    const [load, mem, nvidia, lhmRead] = await Promise.all([
       si.currentLoad().catch(() => null),
-      si.cpuTemperature().catch(() => null),
       si.mem().catch(() => null),
-      si.graphics().catch(() => null),
-      si.battery().catch(() => null),
-      si.networkStats(this.iface ?? undefined).catch(() => []),
-      si.wifiConnections().catch(() => []),
-      readNvidia(),
+      this.refreshNvidia(),
       lhm.read(),
-      this.hooks.volume().catch(() => ({ volume: null, muted: null })),
     ]);
+
+    if (Date.now() - this.audioAt > AUDIO_REFRESH_MS) {
+      this.audioAt = Date.now();
+      try {
+        this.lastAudio = await this.hooks.volume();
+      } catch {
+        /* keep the last known level */
+      }
+    }
+
+    const { temps, graphics, battery, wifi } = this.slow;
+    const netStats = this.netStats;
 
     const now = Date.now();
     let downBps = 0;
@@ -254,12 +345,7 @@ export class TelemetryEngine {
       name: os.cpus()[0]?.model?.trim() ?? null,
       cores: os.cpus().length || null,
     };
-    try {
-      const speed = await si.cpuCurrentSpeed();
-      cpu.clockMhz = speed?.avg ? Math.round(speed.avg * 1000) : null;
-    } catch {
-      cpu.clockMhz = null;
-    }
+    cpu.clockMhz = this.slow.clockMhz;
 
     const controller = graphics?.controllers?.[0];
     const gpu: GpuSample = {
@@ -283,8 +369,6 @@ export class TelemetryEngine {
       // nvidia-smi only exposes a percentage; label it as a fan reading anyway.
       gpu.fanRpm = Math.round(nvidia.fanPct);
     }
-
-    if (audio.volume !== null) this.lastAudio = audio;
 
     const primaryWifi = wifi?.[0];
     const sample: Telemetry = {

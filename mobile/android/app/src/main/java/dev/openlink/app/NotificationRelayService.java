@@ -16,7 +16,6 @@ import android.text.TextUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,7 +25,7 @@ import java.util.Map;
  */
 public class NotificationRelayService extends NotificationListenerService {
 
-    private static final class RelayEntry {
+    private static final class Entry {
         String id;
         String app;
         String title;
@@ -37,18 +36,12 @@ public class NotificationRelayService extends NotificationListenerService {
         String resultKey;
     }
 
-    private static final Map<String, RelayEntry> RECENT = new LinkedHashMap<String, RelayEntry>();
-
-    private static final int MAX_ENTRIES = 24;
-
-    private static void remember(String id, RelayEntry entry) {
-        RECENT.put(id, entry);
-        Iterator<String> keys = RECENT.keySet().iterator();
-        while (RECENT.size() > MAX_ENTRIES && keys.hasNext()) {
-            keys.next();
-            keys.remove();
+    private static final Map<String, Entry> RECENT = new LinkedHashMap<String, Entry>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Entry> eldest) {
+            return size() > 24;
         }
-    }
+    };
 
     private static NotificationRelayService instance;
 
@@ -74,7 +67,7 @@ public class NotificationRelayService extends NotificationListenerService {
         String text = stringOf(extras.getCharSequence(Notification.EXTRA_TEXT));
         if (TextUtils.isEmpty(title) && TextUtils.isEmpty(text)) return;
 
-        RelayEntry entry = new RelayEntry();
+        Entry entry = new Entry();
         entry.id = sbn.getKey();
         entry.app = appLabel(sbn.getPackageName());
         entry.title = title;
@@ -97,7 +90,7 @@ public class NotificationRelayService extends NotificationListenerService {
             }
         }
         synchronized (RECENT) {
-            remember(entry.id, entry);
+            RECENT.put(entry.id, entry);
         }
     }
 
@@ -135,7 +128,7 @@ public class NotificationRelayService extends NotificationListenerService {
     public static JSONArray asJson() {
         JSONArray array = new JSONArray();
         synchronized (RECENT) {
-            for (RelayEntry entry : RECENT.values()) {
+            for (Entry entry : RECENT.values()) {
                 try {
                     JSONObject json = new JSONObject();
                     json.put("id", entry.id);
@@ -154,7 +147,7 @@ public class NotificationRelayService extends NotificationListenerService {
     }
 
     public static boolean reply(Context context, String id, String text) {
-        RelayEntry entry;
+        Entry entry;
         synchronized (RECENT) {
             entry = RECENT.get(id);
         }

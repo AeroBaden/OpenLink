@@ -42,6 +42,7 @@ export function linkView(ctx: Ctx): View {
     el('div', { style: 'margin-top:14px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px' },
       el('div', {}, el('div', { class: 'hint', text: t('pair.code') }), codeNode, countdown),
     ),
+    el('div', { class: 'hint', style: 'margin-top:12px' }, t('pair.firewall')),
   );
 
   const body = el(
@@ -228,7 +229,8 @@ export function linkView(ctx: Ctx): View {
     el: body,
     update(state) {
       const ticket = state.pairing;
-      if (ticket) {
+      const left = ticket ? Math.max(0, Math.round((ticket.expiresAt - Date.now()) / 1000)) : 0;
+      if (ticket && left > 0) {
         if (qrImage.getAttribute('src') !== ticket.dataUrl) {
           qrImage.setAttribute('src', ticket.dataUrl);
           qrImage.classList.add('ready');
@@ -236,9 +238,14 @@ export function linkView(ctx: Ctx): View {
         }
         codeNode.textContent = ticket.code;
         codeNode.classList.remove('dim');
-        const left = Math.max(0, Math.round((ticket.expiresAt - Date.now()) / 1000));
-        countdown.textContent = left > 0 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} ${t('common.minutes')}` : t('pair.expired');
-      } else if (!state.connected && Date.now() - lastIssue > 6_000) {
+        countdown.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} ${t('common.minutes')}`;
+      } else {
+        countdown.textContent = t('pair.expired');
+      }
+      // Keep a scannable code on screen at all times: refresh shortly before the
+      // old one expires instead of leaving a dead QR behind.
+      const stale = !ticket || left <= 20;
+      if (!state.connected && stale && Date.now() - lastIssue > 3_000) {
         lastIssue = Date.now();
         void refreshPairing();
       }

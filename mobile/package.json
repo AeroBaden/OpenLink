@@ -1,6 +1,6 @@
 {
   "name": "openlink-mobile",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenLink for Android — OLED standby clock, sensor deck and continuity remote for your PC.",
   "license": "MIT",
   "private": true,

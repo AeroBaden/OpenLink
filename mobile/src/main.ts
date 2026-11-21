@@ -52,6 +52,7 @@ const state: MState = {
 let link: LinkClient;
 let rtc: PhoneRtc;
 let standby: StandbyView | null = null;
+let refreshFrame = 0;
 let currentView: MView | null = null;
 let lastActivity = Date.now();
 let unread = 0;
@@ -120,9 +121,14 @@ function applyTheme(): void {
   if (isAndroid) void Native.setChrome({ dark: state.settings.theme === 'dark' }).catch(() => undefined);
 }
 
+let headerSignature = '';
+
 function renderHeader(): void {
   const online = state.linkState === 'online';
   const name = state.server?.name ?? state.credentials?.serverName ?? 'OpenLink';
+  const signature = [online, name, link.transport, state.standby, state.settings.lang, t('status.disconnected')].join('|');
+  if (signature === headerSignature) return;
+  headerSignature = signature;
   header.replaceChildren(
     el('div', {},
       el('div', { class: 'title', text: state.standby ? '' : name }),
@@ -135,7 +141,12 @@ function renderHeader(): void {
   );
 }
 
+let tabsSignature = '';
+
 function renderTabs(): void {
+  const signature = [state.screen, unread, state.settings.lang].join('|');
+  if (signature === tabsSignature) return;
+  tabsSignature = signature;
   tabs.replaceChildren();
   if (state.screen === 'connect') {
     tabs.style.display = 'none';
@@ -150,11 +161,28 @@ function renderTabs(): void {
   }
 }
 
+/**
+ * One paint per frame at most. Telemetry, clipboard progress and status all
+ * arrive independently; repainting the whole shell for each frame made the
+ * Android WebView drop frames while scrolling.
+ */
 function refresh(): void {
+  if (refreshFrame) return;
+  refreshFrame = requestAnimationFrame(() => {
+    refreshFrame = 0;
+    paint();
+  });
+}
+
+function paint(): void {
+  if (document.hidden) return;
+  if (state.standby) {
+    standby?.update();
+    return;
+  }
   renderHeader();
   renderTabs();
   currentView?.update?.(state);
-  if (standby) standby.update();
 }
 
 function mount(screen: ScreenId): void {
@@ -474,6 +502,10 @@ async function boot(): Promise<void> {
   });
   link.on('message', (message) => void handleMessage(message));
   link.on('error', (error) => {
+    if (error.startsWith('pair.reject')) {
+      toast(error.endsWith('code') || error.endsWith('expired') ? t('pair.expiredScan') : t('pair.failed'), 'err');
+      return;
+    }
     toast(error === 'auth.reject' ? t('pair.failed') : t('error.network'), 'err');
   });
 

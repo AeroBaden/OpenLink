@@ -52,7 +52,6 @@ export class LinkClient {
   private attempt = 0;
   private stopped = false;
   private pingTimer: number | null = null;
-  private hostIndex = 0;
 
   constructor(credentials: Credentials | null) {
     this.credentials = credentials;
@@ -124,7 +123,17 @@ export class LinkClient {
     return this.pendingTicket?.port ?? this.credentials?.port ?? 8765;
   }
 
+  private connecting: Promise<void> | null = null;
+
   async connect(): Promise<void> {
+    if (this.connecting) return this.connecting;
+    this.connecting = this.doConnect().finally(() => {
+      this.connecting = null;
+    });
+    return this.connecting;
+  }
+
+  private async doConnect(): Promise<void> {
     const hosts = this.candidateHosts();
     if (!hosts.length) {
       this.setState('idle');
@@ -133,24 +142,19 @@ export class LinkClient {
     this.stopped = false;
     this.setState('connecting');
     this.clearReconnect();
-    for (let i = 0; i < hosts.length; i++) {
-      const host = hosts[(this.hostIndex + i) % hosts.length];
-      this.transport = /^(127\.0\.0\.1|localhost|::1)$/.test(host) ? 'usb' : 'wifi';
-      try {
-        await this.openSocket(host, this.port);
-        this.hostIndex = 0;
-        return;
-      } catch {
-        this.ws = null;
-      }
+    const winner = await this.openFirst(hosts, this.port);
+    if (!winner) {
+      this.setState('offline');
+      this.scheduleReconnect();
+      return;
     }
-    this.setState('offline');
-    this.scheduleReconnect();
+    this.ws = winner.ws;
+    this.activeHost = winner.host;
+    this.transport = /^(127\.0\.0\.1|localhost|::1)$/.test(winner.host) ? 'usb' : 'wifi';
   }
 
   async pair(ticket: PairTicket): Promise<void> {
     this.pendingTicket = ticket;
-    this.hostIndex = 0;
     await this.connect();
     if (this.state === 'idle') {
       this.setState('offline');
@@ -158,53 +162,73 @@ export class LinkClient {
     }
   }
 
-  private openSocket(host: string, port: number): Promise<void> {
-    return new Promise((resolve, reject) => {
+  /**
+   * Races every candidate address and keeps the first socket that opens. A
+   * stale virtual adapter or a blocked port used to cost a full timeout each,
+   * which made scanning the QR feel broken.
+   */
+  private openFirst(hosts: string[], port: number): Promise<{ ws: WebSocket; host: string } | null> {
+    return new Promise((resolve) => {
       let settled = false;
-      let ws: WebSocket;
-      try {
-        ws = new WebSocket(`ws://${host}:${port}/ws`);
-      } catch (err) {
-        reject(err);
-        return;
-      }
-      this.ws = ws;
-      this.activeHost = host;
-      const timer = window.setTimeout(() => {
+      const sockets: WebSocket[] = [];
+      const finish = (winner: { ws: WebSocket; host: string } | null): void => {
         if (settled) return;
         settled = true;
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
+        window.clearTimeout(timer);
+        for (const socket of sockets) {
+          if (winner && socket === winner.ws) continue;
+          socket.onopen = null;
+          socket.onerror = null;
+          socket.onclose = null;
+          socket.onmessage = null;
+          try {
+            socket.close();
+          } catch {
+            /* already closed */
+          }
         }
-        reject(new Error('timeout'));
-      }, /^(127\.0\.0\.1|localhost|::1)$/.test(host) ? 2_500 : 5_000);
+        resolve(winner);
+      };
+      const timer = window.setTimeout(() => finish(null), 4_500);
 
-      ws.onopen = () => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        resolve();
-      };
-      ws.onerror = () => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        reject(new Error('socket error'));
-      };
-      ws.onclose = () => {
-        if (settled) {
-          this.sealer = null;
-          this.setState('offline');
-          this.scheduleReconnect();
-          return;
+      for (const host of hosts) {
+        let socket: WebSocket;
+        try {
+          socket = new WebSocket(`ws://${host}:${port}/ws`);
+        } catch {
+          continue;
         }
-        settled = true;
-        window.clearTimeout(timer);
-        reject(new Error('closed'));
-      };
-      ws.onmessage = (event) => void this.onFrame(String(event.data));
+        sockets.push(socket);
+        socket.onerror = () => {
+          /* the timeout or a sibling socket decides */
+        };
+        socket.onclose = () => {
+          /* losers close silently */
+        };
+        socket.onopen = () => {
+          if (settled) {
+            try {
+              socket.close();
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+          // Attach the frame handler in the same task as the open event, before
+          // the host's hello frame can arrive.
+          socket.onmessage = (event) => void this.onFrame(String(event.data));
+          socket.onerror = null;
+          this.ws = socket;
+          socket.onclose = () => {
+            if (this.ws !== socket) return;
+            this.sealer = null;
+            this.setState('offline');
+            this.scheduleReconnect();
+          };
+          finish({ ws: socket, host });
+        };
+      }
+      if (!sockets.length) finish(null);
     });
   }
 
@@ -256,12 +280,14 @@ export class LinkClient {
         this.requestInitialState();
         break;
       }
-      case 'pair.reject':
+      case 'pair.reject': {
+        const reason = (frame as { reason?: string }).reason ?? 'code';
         this.pendingTicket = null;
         this.setState('error');
-        this.emit('error', 'pair.reject');
+        this.emit('error', `pair.reject:${reason}`);
         this.disconnect();
         break;
+      }
       case 'auth.ok': {
         if (!this.credentials) return;
         const key = await deriveSessionKey(this.ephemeral!.privateKey, this.serverPub, this.credentials.pairSecret);
@@ -400,7 +426,6 @@ export class LinkClient {
   /** Attempt a fresh connection after the user changed networks. */
   async rescan(): Promise<void> {
     this.attempt = 0;
-    this.hostIndex = 0;
     this.disconnect();
     this.stopped = false;
     await this.connect();

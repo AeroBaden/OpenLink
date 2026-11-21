@@ -75,15 +75,24 @@ export class PairingManager {
     return this.issue();
   }
 
-  /** Single-use verification with constant-time-ish comparison. */
-  consume(code: string): boolean {
+  /** Constant-time-ish check that does not consume the code yet. */
+  matches(code: string): boolean {
     if (!this.code || Date.now() >= this.expiresAt) return false;
     const a = Buffer.from(this.code);
     const b = Buffer.from(String(code).trim().toUpperCase());
     if (a.length !== b.length) return false;
     let diff = 0;
     for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-    if (diff !== 0) return false;
+    return diff === 0;
+  }
+
+  /**
+   * Single-use verification. Only called once a pairing actually completed, so
+   * a dropped Wi-Fi connection or a phone-side error does not burn the code the
+   * user is looking at.
+   */
+  consume(code: string): boolean {
+    if (!this.matches(code)) return false;
     this.code = null;
     this.expiresAt = 0;
     this.ticket = null;
