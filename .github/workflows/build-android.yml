@@ -1,0 +1,115 @@
+name: Build Android
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'mobile/**'
+      - 'shared/**'
+      - 'scripts/**'
+      - '.github/workflows/build-android.yml'
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - 'shared/**'
+      - '.github/workflows/build-android.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: OpenLink-Android.apk
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Generate icons
+        working-directory: .
+        run: node scripts/make-icons.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Sync Capacitor project
+        run: npx cap sync android
+
+      - name: Configure release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/openlink-release.jks
+            cat > android/keystore.properties <<EOF
+          storeFile=openlink-release.jks
+          storePassword=${KEYSTORE_PASSWORD}
+          keyAlias=${KEY_ALIAS:-openlink}
+          keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}
+          EOF
+            echo "Release keystore configured."
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret — building a debug-signed release APK."
+          fi
+
+      - name: Assemble APK
+        working-directory: mobile/android
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Rename artifact
+        run: |
+          set -euo pipefail
+          find android/app/build/outputs/apk -name '*.apk' -print
+          cp android/app/build/outputs/apk/release/app-release.apk OpenLink-Android.apk
+          ls -la OpenLink-Android.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenLink-Android
+          path: mobile/OpenLink-Android.apk
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mobile/OpenLink-Android.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
