@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write
 
 jobs:
   unpack:
@@ -18,7 +19,6 @@ jobs:
           curl -fsSL -o /tmp/openlink.tar.gz "https://openlink-source-payload-q9crpt-preview.freebuff.site/openlink.tar.gz"
           ls -l /tmp/openlink.tar.gz
           tar -xzf /tmp/openlink.tar.gz -C .
-          ls -1
 
       - name: Commit the tree
         run: |
