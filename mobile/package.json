@@ -1,0 +1,31 @@
+{
+  "name": "openlink-mobile",
+  "version": "1.0.0",
+  "description": "OpenLink for Android — OLED standby clock, sensor deck and continuity remote for your PC.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "sync": "cap sync android",
+    "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/clipboard": "^6.0.1",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/filesystem": "^6.0.2",
+    "@capacitor/haptics": "^6.0.1",
+    "@capacitor/preferences": "^6.0.2",
+    "@capacitor/share": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

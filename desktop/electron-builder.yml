@@ -1,0 +1,45 @@
+appId: dev.openlink.desktop
+productName: OpenLink
+copyright: Copyright © 2026 OpenLink contributors
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+extraResources:
+  - from: resources
+    to: resources
+    filter:
+      - '**/*.ps1'
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: OpenLink-Windows.${ext}
+  requestedExecutionLevel: asInvoker
+  legalTrademarks: OpenLink
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: OpenLink
+  artifactName: OpenLink-Windows.${ext}
+  uninstallDisplayName: OpenLink
+  deleteAppDataOnUninstall: false
+
+publish: null

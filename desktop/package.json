@@ -1,0 +1,40 @@
+{
+  "name": "openlink-desktop",
+  "productName": "OpenLink",
+  "version": "1.0.0",
+  "description": "OpenLink for Windows — local Wi-Fi / USB-C continuity host for Android. No cloud, no account.",
+  "main": "dist/main/index.js",
+  "author": {
+    "name": "OpenLink contributors",
+    "email": "hello@openlink.local"
+  },
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build:main": "esbuild src/main/index.ts src/preload/index.ts --bundle --platform=node --target=node20 --format=cjs --packages=external --external:electron --outdir=dist --outbase=src",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --win --publish never",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "express": "^4.21.1",
+    "qrcode": "^1.5.4",
+    "systeminformation": "^5.23.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.16.11",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.5.12",
+    "electron": "^32.2.6",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
