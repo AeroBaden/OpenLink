@@ -97,7 +97,15 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
+          if ./gradlew --no-daemon assembleRelease > /tmp/gradle.log 2>&1; then
+            echo "Gradle build succeeded."
+          else
+            echo "=== GRADLE FAILED ==="
+            grep -n -E "FAILURE|What went wrong|^\* |Caused by|error:|Warning: |Execution failed" /tmp/gradle.log | head -60 || true
+            echo "--- last 60 lines ---"
+            tail -60 /tmp/gradle.log || true
+            exit 1
+          fi
 
       - name: Rename artifact
         run: |
