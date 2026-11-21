@@ -97,15 +97,24 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          if ./gradlew --no-daemon assembleRelease > /tmp/gradle.log 2>&1; then
-            echo "Gradle build succeeded."
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee /tmp/gradle.log
+
+      - name: Capture the failure log
+        if: failure()
+        working-directory: .
+        run: |
+          mkdir -p ci
+          if [ -f /tmp/gradle.log ]; then
+            grep -n -E "FAILURE|What went wrong|^\* |Caused by|error:|Execution failed|Could not" /tmp/gradle.log | head -80 > ci/last-gradle-error.txt || true
+            tail -80 /tmp/gradle.log >> ci/last-gradle-error.txt
           else
-            echo "=== GRADLE FAILED ==="
-            grep -n -E "FAILURE|What went wrong|^\* |Caused by|error:|Warning: |Execution failed" /tmp/gradle.log | head -60 || true
-            echo "--- last 60 lines ---"
-            tail -60 /tmp/gradle.log || true
-            exit 1
+            echo "no gradle log was produced" > ci/last-gradle-error.txt
           fi
+          git config user.name "OpenLink CI"
+          git config user.email "ci@openlink.local"
+          git add -f ci/last-gradle-error.txt
+          git commit -m "ci: capture the gradle failure" || true
+          git push origin HEAD:main || true
 
       - name: Rename artifact
         run: |
